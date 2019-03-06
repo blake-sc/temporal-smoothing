@@ -1,0 +1,338 @@
+<!doctype html>
+<html>
+<head>
+<title>Thermal Simulator</title>
+</head>
+<body>
+<div>Frame Rate <span id="framerate"></span></div>
+<div>Hit Percent <span id="hit_percent"></span>%</div>
+<canvas id="field" width=400 height=400></canvas>
+
+<br><label>Temporal Smoothing<input id="temporal_smoothing" type="checkbox" checked=checked></label> 
+<label>Smoothing Factor <input id="smoothing_factor" type="number" value="3" style="width: 3em"></label>
+<br><label>Jitter Percent <input id="jitter_percent" type="number" value="0" style="width: 3em"></label>
+<br><label>Jitter Pixels <input id="jitter_pixels" type="number" value="0" style="width: 3em"></label>
+<br><label>Cooldown <input id="cooldown" type="number" value="500" style="width: 3em"></label>
+
+
+<script>
+
+var min = Math.min,
+    max = Math.max;
+    
+    
+var turretCooldown = 10,
+    turretJitterPercent,
+    turretJitterPixels,
+    temporalSmoothing;
+    
+function updateGlobals() {
+    turretJitterPercent = 0.01 * document.getElementById('jitter_percent').value || 0;
+    turretJitterPixels = 1 * document.getElementById('jitter_pixels').value || 0;
+    temporalSmoothing =  1 * document.getElementById('temporal_smoothing').checked;
+    temporalSmoothingFactor = 1 * document.getElementById('smoothing_factor').value || 0;
+    turretCooldown = 1 * document.getElementById('cooldown').value || 0;
+}
+
+
+var c = document.getElementById("field")
+var ctx = c.getContext('2d');
+
+
+var background = '#228800';
+var objects = []
+
+ctx.fillStyle = background;
+ctx.fillRect(0,0, c.width, c.height)
+
+
+var cX=c.width/2, cY = c.height / 2;
+
+function prelim() {
+    console.log('Hi');
+    for (let x = 0; x < c.width; x++) {
+        for (let y = 0; y < c.height; y++) {
+            data[y * c.width + x] = -20;
+        }
+    }
+}
+
+
+
+function dist(obj1, obj2) {
+    let sqr = (n) => n * n;
+    return Math.sqrt(sqr(obj1.x - obj2.x) + sqr(obj1.y - obj2.y))
+}
+
+var lastRender = Date.now();
+
+function updateObject(obj, delta) {
+    
+    if (obj.destroyed) return
+    ctx.fillStyle = background;
+    ctx.fillRect(
+            (0.5 + obj.x - obj.wx) | 0,
+            (0.5 + obj.y - obj.wy) | 0,
+            (0.5 + obj.wx * 2) | 0,
+            (0.5 + obj.wy * 2) | 0
+    );
+    
+    obj.x = obj.x + obj.vx * delta / 1000;
+    obj.y = obj.y + obj.vy * delta / 1000;
+    
+    if (obj.onUpdate) {
+        obj.onUpdate(obj, delta);
+    }
+    
+    if (obj.x < 0) {
+        if (obj.type == 'projectile') {
+            obj.destroyed = true
+        } else {
+            obj.x = 0;
+        }
+    } else if (obj.x >= c.width) {
+        if (obj.type == 'projectile') {
+            obj.destroyed = true
+        } else {
+            obj.x = c.width - 1;
+      }
+    }
+    
+    if (obj.y < 0) {
+        if (obj.type == 'projectile') {s
+            obj.destroyed = truea
+        } else {
+            obj.y = 0;
+        }
+    } else if (obj.y >= c.height) {
+        if (obj.type == 'projectile') {
+            obj.destroyed = true
+        } else {
+            obj.y = c.height - 1;
+      }
+    }
+    
+    if (obj.destroy) {
+        obj.destroyed = true
+    }
+            
+    if (!obj.destroyed) {
+        ctx.fillStyle = obj.color;
+        ctx.fillRect(
+            (0.5 + obj.x - obj.wx) | 0,
+            (0.5 + obj.y - obj.wy) | 0,
+            (0.5 + obj.wx * 2) | 0,
+            (0.5 + obj.wy * 2) | 0
+        );
+    }
+}
+
+
+function control(){
+    player.vy = 0;
+    player.vx = 0;
+  if (keys['KeyW']) {player.vy = clamp(player.vy, -25, 25)}
+  else if (keys['KeyS']) {player.vy = clamp(player.vy, 25, 25)}
+  if (keys['KeyD']) {player.vx = clamp(player.vx, 25, 25)}
+  else if (keys['KeyA']) {player.vx = clamp(player.vx, -25, 25)}
+  
+  
+  if (player.vx != 0 && player.vy != 0) {
+      player.vx /= Math.sqrt(2);
+      player.vy /= Math.sqrt(2);
+    }
+}
+
+var frameRate = 0;
+
+
+function render() {
+    updateGlobals();
+    let timeNow = Date.now();
+    let delta = timeNow - lastRender;
+    
+    if (delta == 0) return
+    frameRate = 1000 / delta;
+    document.getElementById('framerate').innerHTML = Math.round(frameRate);
+    document.getElementById('hit_percent').innerHTML = Math.round(hits ? 100 * hits / (hits + misses) : 0);
+    hits *= 0.98;
+    misses *= 0.98;
+    if (hits < 0.1) hits = 0;
+    if (misses < 0.1) misses = 0;
+    lastRender = timeNow;
+    objects = objects.filter(obj => !obj.destroyed);
+    
+    for (obj of objects.reverse()) {
+        updateObject(obj, delta);        
+    }
+    requestAnimationFrame(render);
+    
+    control()
+}
+
+requestAnimationFrame(render)
+    
+
+player = {
+    type: 'player',
+    x: cX,
+    y: cY,
+    vx: 0,
+    vy: 0,
+    
+    wx: 4,
+    wy: 4,
+    color: "#FF0000",
+    onUpdate: null
+}
+
+
+var hits = 0;
+var misses = 0;
+
+function projectileUpdate(projectile, delta) {
+    if (projectile.stopped) return
+    projectile.lifespan -= delta;
+    if (projectile.lifespan <= 0) {
+        if (dist(projectile, player) <= player.wx) {
+            hits += 1;
+        } else {
+            misses += 1;
+        }
+        projectile.stopped = true
+        projectile.vx = 0;
+        projectile.vy = 0;
+        projectile.color = "#22BB22";
+        setTimeout(()=> {
+            projectile.destroy = true
+        }, 500)
+    }
+    
+
+}
+    
+function turretUpdate(turret, delta) {
+    let sqr = (x) => x * x, sqrt = Math.sqrt, rand = (n) => Math.random() * n - n / 2;
+    if (turret.cooldown > 0) {
+        turret.cooldown -= delta;
+        return
+    }
+    turret.cooldown = turretCooldown;
+    
+    let x = player.x, y = player.y;
+    let pvx, pvy;
+    
+    if (temporalSmoothing) {
+        pvx = marker.averageVx;
+         pvy = marker.averageVy;
+    } else {
+        pvx = player.vx;
+        pvy = player.vy;
+    }
+
+    let dx = x - turret.x;
+    let dy = y - turret.y;
+    let d = sqrt(sqr(dx) + sqr(dy));
+    let travelTime = d / turret.projectileSpeed;
+    
+    let jitter = d * turretJitterPercent + turretJitterPixels;
+    
+    dx = dx + pvx * travelTime + rand(jitter);
+    dy = dy + pvy * travelTime + rand(jitter);
+    vx = turret.projectileSpeed * dx / d;
+    vy = turret.projectileSpeed * dy / d;
+    
+    let projectile = {
+        x: turret.x,
+        y: turret.y,
+        vx: vx,
+        vy: vy,
+        wx: 1,
+        wy: 1,
+        destroy: false,
+        destroyed: false,
+        stopped: false,
+        color: '#00FF22',
+        onUpdate: projectileUpdate,
+        lifespan: 1000 * travelTime
+    }
+    
+    objects.push(projectile)
+}
+
+function addTurret(x, y) {
+    let turret = {
+        x: x,
+        y: y,
+        vx: 0,
+        vy: 0,
+        wx: 4,
+        wy: 4,
+        color: '#AAAA00',
+        onUpdate: turretUpdate,
+        cooldown: Math.random() * turretCooldown,
+        projectileSpeed: 100
+    }
+    objects.push(turret);
+}
+
+
+
+objects.push(player)
+
+for (let x = 0; x < 3; x++) {
+    for (let y = 0; y < 3; y++) {
+        addTurret(50 + Math.random() * 10 + 32 * x, 50  + Math.random() * 10 + 32 * y)
+    }
+}
+
+
+function markerUpdate(marker, delta) {
+    if (temporalSmoothing) {
+        let factor = temporalSmoothingFactor * delta / 1000;
+        marker.averageVx = (marker.averageVx || 0) * (1 - factor) + player.vx * factor;
+        marker.averageVy = (marker.averageVy || 0) * (1 - factor) + player.vy * factor;
+        
+        marker.x = player.x + marker.averageVx * 2;
+        marker.y = player.y + marker.averageVy * 2;
+    } else {
+        marker.x = player.x + player.vx * 2;
+        marker.y = player.y + player.vy * 2;
+    }
+}
+
+
+marker = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    wx: 2,
+    wy: 2,
+    color: 'yellow',
+    onUpdate: markerUpdate
+}
+
+objects.push(marker)
+
+
+
+function clamp(oldValue, change, cap) {
+    let newValue = oldValue + change;
+    return max(-cap, min(cap, newValue))
+}
+    
+
+var keys = {}
+document.onkeydown = function(e){
+    keys[e.code] = true
+}
+document.onkeyup = function(e) {
+    keys[e.code] = false
+}
+    
+
+</script>
+
+
+</body>
